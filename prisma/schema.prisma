@@ -37,6 +37,7 @@ enum EmailStatus {
   COMPLAINED
   OPENED
   PARTIAL
+  RETRYING
 }
 
 enum VerificationResult {
