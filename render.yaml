@@ -1,0 +1,88 @@
+# Render Blueprint for AutoCert — certificate generation, verification & email delivery.
+#
+# Deploy with the "Deploy to Render" button or:  render blueprint launch
+#
+# What you get:
+#   - autocert-web   : Next.js app (Docker runtime, schema auto-synced on boot)
+#   - autocert-db    : managed PostgreSQL (top-level `databases` section)
+#   Optional (commented out below): managed Redis + BullMQ worker service.
+#
+# Queue plans:
+#   1) Simple (default): QUEUE_MODE=inprocess — jobs run inside the web service.
+#      Zero extra infra; best for most events (up to a few thousand certs).
+#   2) Redis plan: uncomment the redis + worker sections, set QUEUE_MODE=redis
+#      and REDIS_URL on autocert-web.
+
+services:
+  # ── Web application ────────────────────────────────────────────────────────
+  - type: web
+    name: autocert-web
+    runtime: docker
+    plan: starter            # upgrade to standard/plus for scale or faster builds
+    healthCheckPath: /api/health
+    autoDeploy: true         # deploy on every git push
+    # Dockerfile ENTRYPOINT is `docker-entrypoint.sh`; this overrides CMD only.
+    dockerCommand: web
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autocert-db
+          property: connectionString
+      # Leave unset: the entrypoint defaults APP_URL to RENDER_EXTERNAL_URL.
+      # Set it explicitly if you serve AutoCert behind a custom domain:
+      # - key: APP_URL
+      #   sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: QUEUE_MODE
+        value: inprocess     # switch to `redis` if you enable the sections below
+      - key: STORAGE_DRIVER
+        value: local         # container disk; use s3/r2/supabase for scale-outs
+      - key: EMAIL_PROVIDER
+        sync: false          # console | resend | smtp | sendgrid | mailgun | ses
+      - key: EMAIL_FROM
+        sync: false          # e.g. certificates@yourdomain.com
+      - key: EMAIL_FROM_NAME
+        value: AutoCert
+      # Set these in the Render dashboard after the first deploy (secrets do
+      # not belong in version control):
+      #   RESEND_API_KEY | SMTP_HOST | SMTP_PORT | SMTP_SECURE |
+      #   SMTP_USER | SMTP_PASSWORD | SENDGRID_API_KEY | MAILGUN_API_KEY |
+      #   MAILGUN_DOMAIN | AWS_REGION | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY
+      # S3-compatible storage (optional): STORAGE_DRIVER=s3 + STORAGE_ENDPOINT +
+      #   STORAGE_ACCESS_KEY + STORAGE_SECRET_KEY + STORAGE_BUCKET
+
+  # ── Optional: BullMQ worker (enable together with the redis section) ──────
+  # - type: worker
+  #   name: autocert-worker
+  #   runtime: docker
+  #   plan: starter
+  #   dockerCommand: worker
+  #   dockerContext: .
+  #   envVars:
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: autocert-db
+  #         property: connectionString
+  #     - key: QUEUE_MODE
+  #       value: redis
+  #     - key: REDIS_URL
+  #       fromService:
+  #         name: autocert-redis
+  #         type: redis
+  #         property: connectionString
+
+# ── Managed PostgreSQL ────────────────────────────────────────────────────────
+databases:
+  - name: autocert-db
+    databaseName: autocert
+    user: autocert
+    plan: basic-256mb        # smallest paid tier; Render's free DB (if offered)
+                             # expires after 30 days — use this for a real deploy
+
+# ── Optional: managed Redis (enable together with the worker service) ────────
+# redis:
+#   - name: autocert-redis
+#     plan: starter
+#     ipAllowList: []         # empty list = internal connections only
+#     maxmemoryPolicy: noeviction

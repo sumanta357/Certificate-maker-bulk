@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 98%;
+    --foreground: 30 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 30 20% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 20% 12%;
+    --primary: 24 70% 45%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 40 20% 92%;
+    --panels: 0 0% 100%;
+    --muted: 40 22% 92%;
+    --muted-foreground: 30 10% 42%;
+    --accent: 24 60% 90%;
+    --accent-foreground: 24 70% 30%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 35 15% 87%;
+    --input: 35 15% 87%;
+    --ring: 24 70% 45%;
+    --radius: 0.625rem;
+  }
+  .dark {
+    --background: 24 12% 8%;
+    --foreground: 40 25% 92%;
+    --card: 24 12% 11%;
+    --card-foreground: 40 25% 92%;
+    --popover: 24 12% 11%;
+    --popover-foreground: 40 25% 100%;
+    --primary: 27 75% 55%;
+    --primary-foreground: 24 30% 8%;
+    --secondary: 24 10% 17%;
+    --secondary-foreground: 40 20% 85%;
+    --panels: 24 12% 11%;
+    --muted: 24 10% 16%;
+    --muted-foreground: 35 12% 62%;
+    --accent: 24 40% 22%;
+    --accent-foreground: 33 60% 75%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 24 10% 20%;
+    --input: 24 10% 20%;
+    --ring: 27 75% 55%;
+  }
+  * { border-color: hsl(var(--border)); }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors
+      disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+  .btn-primary { @apply bg-primary text-primary-foreground hover:opacity-90; }
+  .btn-secondary { @apply border border-input bg-card hover:bg-muted; }
+  .btn-danger { @apply bg-destructive text-destructive-foreground hover:opacity-90; }
+  .btn-ghost { @apply hover:bg-muted; }
+  .btn-sm { @apply px-2.5 py-1.5 text-xs; }
+  .card { @apply rounded-xl border bg-card shadow-sm; }
+  .input { @apply flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring; }
+  .label { @apply text-xs font-medium text-muted-foreground; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium; }
+  .table-wrap { @apply overflow-x-auto rounded-xl border bg-card; }
+  .th { @apply px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide; }
+  .td { @apply px-3 py-2.5 text-sm border-t; }
+}
+
+/* Editor canvas: certificate colors are independent of dashboard theme */
+.cert-canvas-wrap {
+  background: repeating-conic-gradient(#e2e8f0 0% 25%, #f8fafc 0% 50%) 50% / 24px 24px;
+}
+.dark .cert-canvas-wrap {
+  background: repeating-conic-gradient(#1e293b 0% 25%, #0f172a 0% 50%) 50% / 24px 24px;
+}
+.editor-scroll {
+  scrollbar-width: thin;
+}

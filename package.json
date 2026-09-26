@@ -1,0 +1,57 @@
+{
+  "name": "autocert",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p ${PORT:-3000}",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "worker": "node scripts/worker.js",
+    "postinstall": "node scripts/postinstall-prisma.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "aws4fetch": "^1.0.20",
+    "bcryptjs": "^3.0.2",
+    "bullmq": "^5.34.0",
+    "clsx": "^2.1.1",
+    "ioredis": "^5.4.0",
+    "jszip": "^3.10.1",
+    "konva": "^9.3.20",
+    "lucide-react": "^0.480.0",
+    "next": "^14.2.32",
+    "next-themes": "^0.4.6",
+    "nodemailer": "^10.0.10",
+    "papaparse": "^5.5.3",
+    "pdfkit": "^0.20.2",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.10",
+    "resend": "^6.30.0",
+    "tailwind-merge": "^3.7.0",
+    "use-image": "^1.1.4",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.3.16",
+    "@types/pdfkit": "^0.13.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/bcryptjs": "^3.0.0",
+    "dotenv": "^16.4.0",
+    "prisma": "^6.16.2",
+    "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

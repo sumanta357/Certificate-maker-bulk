@@ -1,0 +1,74 @@
+# Local development stack: web + PostgreSQL + Redis + worker.
+# Production deploys: see render.yaml (Render blueprint).
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: autocert
+      POSTGRES_PASSWORD: autocert
+      POSTGRES_DB: autocert
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autocert"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    image: autocert
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://autocert:autocert@db:5432/autocert
+      AUTH_SECRET: change-me-in-production
+      APP_URL: http://localhost:3000
+      QUEUE_MODE: inprocess   # set to redis + REDIS_URL to use the worker below
+      STORAGE_DRIVER: local
+      EMAIL_PROVIDER: console
+      EMAIL_FROM: certificates@localhost
+      EMAIL_FROM_NAME: AutoCert
+    ports:
+      - "3000:3000"
+    volumes:
+      - storage:/app/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build: .
+    image: autocert
+    depends_on:
+      web:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://autocert:autocert@db:5432/autocert
+      QUEUE_MODE: redis
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - storage:/app/storage
+    command: worker
+
+volumes:
+  pgdata:
+  storage:

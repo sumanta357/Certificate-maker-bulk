@@ -1,0 +1,320 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  website           String?
+  contactEmail      String?
+  address           String?
+  logoAssetId       String?
+  emailSignature    String?
+  defaultTemplateId String?
+  idPrefix          String   @default("AC")
+  // Per-organization sender identity (GUI-editable). Falls back to the
+  // deployment-wide EMAIL_FROM / EMAIL_FROM_NAME env vars when null.
+  emailFromAddress  String?
+  emailFromName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users          User[]
+  events         Event[]
+  templates      Template[]
+  assets         Asset[]
+  auditLogs      AuditLog[]
+  emailTemplates EmailTemplate[]
+}
+
+model Asset {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  kind           String       @default("image")
+  mimeType       String
+  size           Int
+  storageKey     String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  name           String?
+  passwordHash   String
+  role           String         @default("ADMIN")
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  auditLogs   AuditLog[]
+  csvImports  CSVImport[]
+  resetTokens PasswordResetToken[]
+  sessions    Session[]
+
+  @@index([organizationId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Event {
+  id                  String       @id @default(cuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                String
+  slug                String
+  organizationDisplay String?
+  eventDate           DateTime?
+  location            String?
+  organizer           String?
+  certificateType     String       @default("Certificate of Participation")
+  description         String?
+  website             String?
+  contactEmail        String?
+  idPrefix            String?
+  lastSeq             Int          @default(0)
+  testMode            Boolean      @default(false)
+  testEmail           String?
+  templateId          String?
+  template            Template?    @relation("EventTemplate", fields: [templateId], references: [id], onDelete: SetNull)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  participants  Participant[]
+  imports       CSVImport[]
+  emailTemplate EmailTemplate?
+  emailJobs     EmailJob[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model CSVImport {
+  id             String   @id @default(cuid())
+  organizationId String
+  eventId        String
+  event          Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  uploadedById   String?
+  uploadedBy     User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  fileName       String
+  storageKey     String?
+  columns        String
+  rows           Int      @default(0)
+  validRows      Int      @default(0)
+  invalidRows    Int      @default(0)
+  warnings       String?
+  createdAt      DateTime @default(now())
+
+  participants Participant[]
+
+  @@index([eventId])
+  @@index([organizationId])
+}
+
+model Template {
+  id              String           @id @default(cuid())
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  isBuiltIn       Boolean          @default(false)
+  isFavorite      Boolean          @default(false)
+  activeVersionId String?
+  activeVersion   TemplateVersion? @relation("TemplateActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  versions     TemplateVersion[] @relation("TemplateVersions")
+  events       Event[]           @relation("EventTemplate")
+  certificates Certificate[]
+
+  @@index([organizationId])
+}
+
+model TemplateVersion {
+  id         String   @id @default(cuid())
+  templateId String
+  template   Template @relation("TemplateVersions", fields: [templateId], references: [id], onDelete: Cascade)
+  version    Int
+  design     Json
+  note       String?
+  createdAt  DateTime @default(now())
+
+  activeFor    Template[]    @relation("TemplateActiveVersion")
+  certificates Certificate[]
+
+  @@unique([templateId, version])
+  @@index([templateId])
+}
+
+model Participant {
+  id             String            @id @default(cuid())
+  organizationId String
+  eventId        String
+  event          Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  importId       String?
+  import         CSVImport?        @relation(fields: [importId], references: [id], onDelete: SetNull)
+  name           String
+  email          String?
+  data           Json
+  rowNumber      Int
+  status         String @default("PENDING")
+  certificateId  String?           @unique
+  certificate    Certificate?
+  error          String?
+  statusMessage  String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([eventId, email])
+  @@index([eventId])
+  @@index([eventId, status])
+  @@index([organizationId])
+}
+
+model Certificate {
+  id                String           @id @default(cuid())
+  organizationId    String
+  participantId     String           @unique
+  participant       Participant      @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  certificateId     String           @unique
+  templateId        String?
+  template          Template?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  templateVersionId String?
+  templateVersion   TemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  designSnapshot    Json
+  pdfKey            String?
+  pdfSize           Int?
+  revokedAt         DateTime?
+  revokeReason      String?
+  issuedAt          DateTime         @default(now())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  verifications Verification[]
+
+  @@index([organizationId])
+  @@index([templateId])
+}
+
+model EmailTemplate {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  eventId        String       @unique
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  subject        String
+  body           String
+  updatedAt      DateTime     @updatedAt
+}
+
+model EmailJob {
+  id             String      @id @default(cuid())
+  organizationId String
+  eventId        String
+  event          Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  status         String @default("PENDING")
+  total          Int         @default(0)
+  sent           Int         @default(0)
+  failed         Int         @default(0)
+  testMode       Boolean     @default(false)
+  testEmail      String?
+  createdById    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  logs EmailLog[]
+
+  @@index([eventId])
+  @@index([organizationId])
+}
+
+model EmailLog {
+  id                String      @id @default(cuid())
+  organizationId    String
+  emailJobId        String?
+  emailJob          EmailJob?   @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  participantId     String?
+  certificateId     String?
+  to                String
+  subject           String
+  status            String @default("PENDING")
+  provider          String?
+  providerMessageId String?
+  error             String?
+  attempts          Int         @default(0)
+  nextRetryAt       DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  openedAt          DateTime?
+  bouncedAt         DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([emailJobId])
+  @@index([certificateId])
+  @@index([organizationId])
+}
+
+model Verification {
+  id             String             @id @default(cuid())
+  organizationId String
+  certificateId  String
+  certificate    Certificate        @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  result         String
+  ipHash         String?
+  userAgent      String?
+  createdAt      DateTime           @default(now())
+
+  @@index([certificateId])
+  @@index([organizationId])
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String
+  entityType     String?
+  entityId       String?
+  metadata       String?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+}
