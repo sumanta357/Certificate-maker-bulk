@@ -24,7 +24,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app ./
 COPY . .
-RUN bun run build
+# `npm run build` = `prisma generate && next build`, using the local
+# node_modules/.bin — no global bun needed in this stage (bun is only used in
+# the deps stage to install from bun.lock).
+RUN npm run build
 
 # ── Stage 3: runtime ────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
