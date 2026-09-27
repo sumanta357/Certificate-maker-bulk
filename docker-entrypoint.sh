@@ -13,6 +13,18 @@ if [ -z "${APP_URL:-}" ] && [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
   export APP_URL="$RENDER_EXTERNAL_URL"
 fi
 
+# Fail fast with an actionable message instead of a raw Prisma P1012 stack.
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint] ERROR: DATABASE_URL is not set (PostgreSQL connection string required)." >&2
+  echo "[entrypoint] Fix (Render):" >&2
+  echo "[entrypoint]   1. Postgres instance → Connections → copy Internal Database URL" >&2
+  echo "[entrypoint]   2. <your-web-service> → Environment → add DATABASE_URL → Save Changes" >&2
+  echo "[entrypoint] If you deploy via the render.yaml Blueprint, DATABASE_URL is wired" >&2
+  echo "[entrypoint] automatically (fromDatabase: autocert-db) — re-sync the Blueprint or" >&2
+  echo "[entrypoint] create the service with New → Blueprint instead of New → Web Service." >&2
+  exit 1
+fi
+
 case "$ROLE" in
   web|push)
     echo "[entrypoint] syncing database schema (prisma db push)…"
