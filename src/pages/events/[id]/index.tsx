@@ -39,12 +39,14 @@ const TABS = [
   { key: "send", label: "Generate & Send", icon: MailCheck },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
+const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
 
 export default function EventWorkspace() {
   const router = useRouter();
   const id = typeof router.query.id === "string" ? router.query.id : "";
 
-  const [tab, setTab] = useState<TabKey>("overview");
+  const [tab, setTabState] = useState<TabKey>("overview");
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [event, setEvent] = useState<EventData["event"] | null>(null);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -59,11 +61,31 @@ export default function EventWorkspace() {
   const [sendingConfirm, setSendingConfirm] = useState<null | { count: number; invalid: number }>(null);
   const [testEmail, setTestEmail] = useState("");
   const [busyFlag, setBusyFlag] = useState<string | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const inflightRef = useRef(false);
 
   const notify = (kind: "ok" | "err", msg: string) => {
     setToast({ kind, msg });
     setTimeout(() => setToast(null), 5000);
   };
+
+  // Keep the active tab in the URL (?tab=…) so refreshing, following a link
+  // or coming back to the event lands on the same step instead of silently
+  // resetting to Overview (where there is no generate action).
+  useEffect(() => {
+    if (!router.isReady) return;
+    const t = router.query.tab;
+    setTabState(typeof t === "string" && TAB_KEYS.includes(t) ? (t as TabKey) : "overview");
+  }, [router.isReady, router.query.tab]);
+
+  const setTab = useCallback((t: TabKey) => {
+    setTabState(t);
+    if (!router.isReady) return;
+    const query = { ...router.query };
+    if (t === "overview") delete query.tab;
+    else query.tab = t;
+    void router.replace({ pathname: router.pathname, query }, undefined, { shallow: true });
+  }, [router]);
 
   const loadEvent = useCallback(async () => {
     if (!id) return;
@@ -84,15 +106,43 @@ export default function EventWorkspace() {
     const res = await fetch(`/api/events/${id}/participants?${params}`);
     if (res.ok) {
       const d = await res.json();
+      const counts: Record<string, number> = d.statusCounts || {};
       setParticipants(d.participants || []);
-      setStatusCounts(d.statusCounts || {});
+      setStatusCounts(counts);
       setTotal(d.total || 0);
+      inflightRef.current = ((counts["QUEUED"] || 0) + (counts["GENERATING"] || 0) + (counts["SENDING"] || 0)) > 0;
+      setStatsLoaded(true);
     }
   }, [id, page, q, statusFilter]);
 
   useEffect(() => { void loadEvent(); }, [loadEvent]);
   useEffect(() => { void loadTemplates(); }, [loadTemplates]);
   useEffect(() => { void loadParticipants(); }, [loadParticipants]);
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  // Generation/email jobs run in the background — keep refreshing the statuses
+  // so the table updates without the user having to reload the page.
+  function watchProgress() {
+    stopPolling();
+    let ticks = 0;
+    pollRef.current = window.setInterval(() => {
+      void loadParticipants();
+      ticks += 1;
+      if (ticks >= 30 || (ticks > 1 && !inflightRef.current)) stopPolling();
+    }, 2000);
+  }
+
+  useEffect(() => () => stopPolling(), []);
+  useEffect(() => {
+    if (statsLoaded && inflightRef.current) watchProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statsLoaded]);
 
   // ── CSV upload + mapping wizard ────────────────────────────────────────────
 
@@ -205,9 +255,11 @@ export default function EventWorkspace() {
         body: JSON.stringify({ mode, participantIds }),
       });
       const data = await res.json();
-      if (res.ok) notify("ok", `Generation started for ${data.queued} participants`);
-      else notify("err", data.error || "Generation failed to start");
-      setTimeout(() => void loadParticipants(), 1500);
+      if (res.ok) {
+        notify("ok", `Generation started for ${data.queued} participants`);
+        void loadParticipants();
+        watchProgress();
+      } else notify("err", data.error || "Generation failed to start");
     } finally {
       setBusyFlag(null);
     }
@@ -223,8 +275,11 @@ export default function EventWorkspace() {
         body: JSON.stringify({}),
       });
       const data = await res.json();
-      if (res.ok) notify("ok", `Email batch queued for ${data.queued} recipients`);
-      else notify("err", data.error || "Could not queue emails");
+      if (res.ok) {
+        notify("ok", `Email batch queued for ${data.queued} recipients`);
+        void loadParticipants();
+        watchProgress();
+      } else notify("err", data.error || "Could not queue emails");
       setSendingConfirm(null);
     } finally {
       setBusyFlag(null);
@@ -274,7 +329,10 @@ export default function EventWorkspace() {
     }
   }
 
-  const pendingCount = statusCounts["PENDING"] || 0;
+  // PENDING plus FAILED both mean "no certificate yet" — FAILED rows must stay
+  // clickable or a failed render can never be retried from the UI.
+  const pendingCount = (statusCounts["PENDING"] || 0) + (statusCounts["FAILED"] || 0);
+  const inFlightCount = (statusCounts["QUEUED"] || 0) + (statusCounts["GENERATING"] || 0) + (statusCounts["SENDING"] || 0);
   const generatedCount = (statusCounts["GENERATED"] || 0) + (statusCounts["SENT"] || 0) + (statusCounts["QUEUED"] || 0) + (statusCounts["SENDING"] || 0);
   const failedCount = statusCounts["FAILED"] || 0;
   const withEmail = participants.filter((p) => p.email).length;
@@ -286,6 +344,20 @@ export default function EventWorkspace() {
       </DashboardShell>
     );
   }
+
+  // Single obvious next action, so returning to an event always shows where
+  // certificate generation lives.
+  const nextStep = !statsLoaded
+    ? null
+    : total === 0
+    ? { tab: "import" as TabKey, title: "Step 1 · Import participants", body: "Upload a CSV with everyone who should receive a certificate.", cta: "Import CSV" }
+    : !event.templateId
+    ? { tab: "template" as TabKey, title: "Step 2 · Choose a template", body: "Pick the certificate design — generation stays blocked until a template is selected.", cta: "Choose template" }
+    : pendingCount > 0
+    ? { tab: "send" as TabKey, title: "Step 3 · Generate certificates", body: `${pendingCount} participant(s) still need a PDF. Generation runs in the background.`, cta: `Generate ${pendingCount}` }
+    : inFlightCount > 0
+    ? { tab: "send" as TabKey, title: "Step 3 · Generation in progress", body: `${inFlightCount} certificate(s) are being processed right now.`, cta: "Track progress" }
+    : { tab: "send" as TabKey, title: "Step 3 · Certificates ready", body: `${generatedCount} certificate(s) generated — email them or download the ZIP.`, cta: "Generate & Send" };
 
   return (
     <DashboardShell title={event.name}>
@@ -312,6 +384,16 @@ export default function EventWorkspace() {
 
       {/* ── Overview tab ── */}
       {tab === "overview" && (
+        <>
+        {nextStep && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/5 p-4">
+            <div>
+              <p className="text-sm font-semibold">{nextStep.title}</p>
+              <p className="text-sm text-muted-foreground">{nextStep.body}</p>
+            </div>
+            <button className="btn btn-primary" onClick={() => setTab(nextStep.tab)}>{nextStep.cta}</button>
+          </div>
+        )}
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="card p-6 lg:col-span-2">
             <h2 className="font-display text-xl font-bold">{event.name}</h2>
@@ -334,7 +416,7 @@ export default function EventWorkspace() {
                 <Row label="Generated" value={String(generatedCount)} />
                 <Row label="Failed" value={String(failedCount)} />
               </div>
-              <Link href={`/events/${id}`} className="btn btn-secondary btn-sm mt-4 w-full" onClick={() => setTab("participants")}>View participants</Link>
+              <button className="btn btn-secondary btn-sm mt-4 w-full" onClick={() => setTab("participants")}>View participants</button>
             </div>
             <div className="card p-5">
               <h3 className="text-sm font-semibold">Event settings</h3>
@@ -343,6 +425,7 @@ export default function EventWorkspace() {
             </div>
           </div>
         </div>
+        </>
       )}
 
       {/* ── Participants tab ── */}
@@ -568,18 +651,45 @@ export default function EventWorkspace() {
           <div className="card space-y-4 p-6">
             <h2 className="flex items-center gap-2 font-semibold"><Zap className="h-5 w-5 text-primary" /> 1 · Generate certificates</h2>
             <p className="text-sm text-muted-foreground">
-              PDFs are rendered in the background with unique IDs and QR codes. {pendingCount} participant(s) pending,
-              {generatedCount} already generated.
+              PDFs are rendered in the background with unique IDs and QR codes. {pendingCount} waiting ·
+              {" "}{inFlightCount} in progress · {generatedCount} already generated.
             </p>
-            <div className="flex gap-2">
-              <button className="btn btn-primary" onClick={() => generate("skip")} disabled={busyFlag === "generate" || !pendingCount}>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="btn btn-primary"
+                onClick={() => generate("skip")}
+                disabled={busyFlag === "generate" || !pendingCount || !event.templateId}
+              >
                 {busyFlag === "generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                 Generate {pendingCount || ""}
               </button>
-              <button className="btn btn-secondary" onClick={() => generate("regenerate")} disabled={busyFlag === "generate"}>Regenerate all</button>
+              <button
+                className="btn btn-secondary"
+                disabled={busyFlag === "generate" || !event.templateId || !generatedCount}
+                onClick={() => {
+                  if (confirm(`Regenerate all ${generatedCount} certificate(s)? Existing PDFs will be rebuilt.`)) void generate("regenerate");
+                }}
+              >
+                Regenerate all
+              </button>
             </div>
             {!event.templateId && (
-              <p className="flex items-center gap-1.5 text-sm text-amber-600"><AlertTriangle className="h-4 w-4" /> Select a template first (Template tab).</p>
+              <p className="flex flex-wrap items-center gap-2 text-sm text-amber-600">
+                <AlertTriangle className="h-4 w-4 shrink-0" /> Select a certificate template first.
+                <button className="font-medium underline" onClick={() => setTab("template")}>Open Template tab</button>
+              </p>
+            )}
+            {!!event.templateId && !total && (
+              <p className="text-sm text-muted-foreground">
+                No participants yet —{" "}
+                <button className="font-medium underline" onClick={() => setTab("import")}>import a CSV</button> first.
+              </p>
+            )}
+            {!!event.templateId && !!total && !pendingCount && !inFlightCount && (
+              <p className="text-sm text-muted-foreground">
+                Nothing pending — every participant has a certificate. Use Regenerate all to rebuild them,
+                or download the ZIP from the Participants tab.
+              </p>
             )}
           </div>
 

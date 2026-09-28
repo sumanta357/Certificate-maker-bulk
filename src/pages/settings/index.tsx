@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Building2, KeyRound, Users2 } from "lucide-react";
+import { Building2, KeyRound, Mail, Send, Users2 } from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 
 type Org = {
@@ -9,6 +9,15 @@ type Org = {
   emailFromAddress: string | null; emailFromName: string | null;
 };
 type TeamUser = { id: string; name: string | null; email: string; role: string; isActive: boolean };
+type EmailCfg = {
+  provider: string;
+  configured: boolean;
+  missing: string[];
+  envFrom: { address: string | null; name: string | null };
+  orgFrom: { address: string | null; name: string | null };
+  effectiveFrom: string;
+  stats: { sent: number; failed: number; pending: number };
+};
 
 const ROLES = ["SUPER_ADMIN", "ADMIN", "EDITOR", "VIEWER"];
 
@@ -19,6 +28,36 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState("");
 
   const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "" });
+  const [emailCfg, setEmailCfg] = useState<EmailCfg | null>(null);
+  const [testTo, setTestTo] = useState("");
+  const [testState, setTestState] = useState<{ busy: boolean; result?: string; error?: string }>({ busy: false });
+
+  useEffect(() => {
+    fetch("/api/settings/email")
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then(setEmailCfg)
+      .catch(() => {});
+  }, []);
+
+  async function sendTest(e: React.FormEvent) {
+    e.preventDefault();
+    setTestState({ busy: true });
+    try {
+      const res = await fetch("/api/settings/email?action=test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: testTo }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setTestState({ busy: false, error: d.error || "Test send failed" });
+      else {
+        setTestState({ busy: false, result: d.note || `Sent via ${d.provider}${d.messageId ? ` (${d.messageId})` : ""}` });
+        fetch("/api/settings/email").then(async (r) => (r.ok ? r.json() : null)).then(setEmailCfg).catch(() => {});
+      }
+    } catch {
+      setTestState({ busy: false, error: "Test send failed" });
+    }
+  }
 
   useEffect(() => {
     fetch("/api/settings")
@@ -155,6 +194,92 @@ export default function SettingsPage() {
         </section>
 
         <div className="space-y-6">
+          <section className="card p-6">
+            <h2 className="flex items-center gap-2 font-semibold"><Mail className="h-4 w-4 text-primary" /> Email delivery</h2>
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="badge bg-primary/15 text-primary">{emailCfg?.provider || "…"}</span>
+                {emailCfg && (
+                  <span
+                    className={`badge ${
+                      emailCfg.provider === "console"
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        : emailCfg.configured
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : "bg-destructive/15 text-destructive"
+                    }`}
+                  >
+                    {emailCfg.provider === "console"
+                      ? "log-only — not sending"
+                      : emailCfg.configured
+                        ? "live"
+                        : "missing credentials"}
+                  </span>
+                )}
+                {emailCfg && (
+                  <span className="text-xs text-muted-foreground">
+                    {emailCfg.stats.sent} sent · {emailCfg.stats.failed} failed · {emailCfg.stats.pending} in progress
+                  </span>
+                )}
+              </div>
+
+              {emailCfg && emailCfg.provider === "console" && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
+                  <code className="font-mono">EMAIL_PROVIDER=console</code> only writes emails to the server
+                  log — nothing reaches an inbox. To send real email, set{" "}
+                  <code className="font-mono">EMAIL_PROVIDER=resend</code> and{" "}
+                  <code className="font-mono">RESEND_API_KEY</code> (Render → Environment → Save; in this
+                  preview, Settings → Environment), then reload this page.
+                </div>
+              )}
+
+              {emailCfg && !emailCfg.configured && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
+                  Set these environment variables on your host (e.g. Render → Environment → Save):
+                  <code className="mx-1 font-mono">{emailCfg.missing.join(", ")}</code>
+                  {emailCfg.provider === "resend" && (
+                    <>
+                      — create a free API key in Resend → API Keys, and set the verified sender via{" "}
+                      <code className="mx-1 font-mono">EMAIL_FROM</code>.
+                    </>
+                  )}
+                </div>
+              )}
+
+              {emailCfg && emailCfg.configured && emailCfg.provider !== "console" && !emailCfg.effectiveFrom && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
+                  No sender address resolved — set <code className="mx-1 font-mono">EMAIL_FROM</code> (and{" "}
+                  <code className="font-mono">EMAIL_FROM_NAME</code>) or a From address in Sender identity.
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Effective sender: <span className="font-medium text-foreground">{emailCfg?.effectiveFrom || "(platform default)"}</span>
+                {" "}— set per-organization in the Sender identity box, or platform-wide via EMAIL_FROM / EMAIL_FROM_NAME env vars.
+                Provider credentials are server-side env vars only and are never shown in the UI.
+              </p>
+
+              <form onSubmit={sendTest} className="flex flex-wrap items-end gap-2">
+                <label className="block flex-1 min-w-[200px]">
+                  <span className="label">Send a test email to</span>
+                  <input
+                    type="email"
+                    required
+                    className="input mt-1"
+                    placeholder="you@example.com"
+                    value={testTo}
+                    onChange={(e) => setTestTo(e.target.value)}
+                  />
+                </label>
+                <button className="btn btn-secondary" disabled={testState.busy}>
+                  <Send className="h-3.5 w-3.5" /> {testState.busy ? "Sending…" : "Test send"}
+                </button>
+              </form>
+              {testState.result && <p className="text-xs text-emerald-600 dark:text-emerald-400">{testState.result}</p>}
+              {testState.error && <p className="text-xs text-destructive">{testState.error}</p>}
+            </div>
+          </section>
+
           <section className="card p-6">
             <h2 className="flex items-center gap-2 font-semibold"><KeyRound className="h-4 w-4 text-primary" /> Change password</h2>
             <form onSubmit={changePassword} className="mt-4 space-y-3">

@@ -50,6 +50,9 @@ export async function handleGenerateCertificates(payload: {
   const skipped = participants.filter((p) => p.certificateId).length;
 
   for (const participant of participants) {
+    // Never rebuild a participant that already has a live certificate —
+    // creating a second Certificate row would violate the unique constraint.
+    if (participant.certificateId) continue;
     try {
       await prisma.participant.update({
         where: { id: participant.id },

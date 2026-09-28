@@ -1,5 +1,6 @@
 // POST /api/events/:id/generate — queue certificate generation for the event
 import type { NextApiRequest, NextApiResponse } from "next";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireRole, ApiError } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -20,10 +21,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       mode?: "skip" | "regenerate" | "replace";
     };
 
-    // If regenerating, clear existing certificate rows for selected participants.
-    if (mode === "regenerate" && participantIds?.length) {
+    // If regenerating, clear existing certificate rows. With explicit IDs only
+    // those are reset; without IDs (the "Regenerate all" button) every
+    // participant of this event is reset so the rebuild actually happens.
+    if (mode === "regenerate") {
       const certs = await prisma.certificate.findMany({
-        where: { participantId: { in: participantIds }, organizationId: organization.id },
+        where: {
+          organizationId: organization.id,
+          ...(participantIds?.length
+            ? { participantId: { in: participantIds } }
+            : { participant: { eventId: event.id } }),
+        },
       });
       if (certs.length) {
         await prisma.certificate.deleteMany({
@@ -36,12 +44,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Same eligibility as the job handler: PENDING rows plus FAILED/stuck rows
+    // that never got a certificate — otherwise they can never be retried.
+    const eligible: Prisma.ParticipantWhereInput = {
+      status: { in: ["PENDING", "QUEUED", "FAILED", "GENERATING"] },
+      certificateId: null,
+    };
     const pendingCount = await prisma.participant.count({
       where: {
         eventId: event.id,
         organizationId: organization.id,
-        status: "PENDING",
-        certificateId: null,
+        ...eligible,
         ...(participantIds?.length ? { id: { in: participantIds } } : {}),
       },
     });
@@ -50,17 +63,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await prisma.participant.updateMany({
       where: {
         eventId: event.id,
-        status: "PENDING",
-        certificateId: null,
+        ...eligible,
         ...(participantIds?.length ? { id: { in: participantIds } } : {}),
       },
-      data: { status: "QUEUED" },
+      data: { status: "QUEUED", error: null },
     });
 
     await enqueue("generate-certificates", {
       eventId: event.id,
       organizationId: organization.id,
       triggeredBy: user.id,
+      ...(participantIds?.length ? { participantIds } : {}),
     });
 
     await audit({

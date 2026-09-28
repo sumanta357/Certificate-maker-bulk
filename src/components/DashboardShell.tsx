@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import {
   LayoutDashboard, CalendarDays, Users, Palette, Award, Mail, ShieldCheck, Settings, ScrollText, LogOut,
+  ShieldHalf,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,9 @@ const NAV = [
   { href: "/audit", label: "Audit Log", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+// Shown only to the platform Super Admin (cross-organization master console).
+const ADMIN_NAV = { href: "/admin", label: "Admin", icon: ShieldHalf };
 
 export function DashboardShell({ children, title }: { children: ReactNode; title: string }) {
   const router = useRouter();
@@ -74,6 +78,8 @@ export function DashboardShell({ children, title }: { children: ReactNode; title
 
   if (!me) return null;
 
+  const nav = me.role === "SUPER_ADMIN" ? [...NAV, ADMIN_NAV] : NAV;
+
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
@@ -87,7 +93,7 @@ export function DashboardShell({ children, title }: { children: ReactNode; title
           <p className="truncate text-xs text-muted-foreground">{me.email}</p>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active = router.pathname === item.href || router.pathname.startsWith(item.href + "/");
             return (
               <Link
@@ -121,7 +127,7 @@ export function DashboardShell({ children, title }: { children: ReactNode; title
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/85 px-4 backdrop-blur md:px-8">
           <div className="flex items-center gap-3 overflow-x-auto md:hidden">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <Link key={item.href} href={item.href} className="text-muted-foreground hover:text-foreground">
                 <item.icon className="h-5 w-5" />
               </Link>
